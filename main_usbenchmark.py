@@ -229,24 +229,26 @@ def run_candle_tick(feed, stanley, account):
 def push_dashboard(stanley, account, mode):
     trade = stanley.current_trade
     price = _last.get("price")
-    pos, floating = None, 0.0
+    pos, floating, locked = None, 0.0, None
     if trade is not None and stanley.in_trade:
         try:
             pts = (price - trade.entry_price) if trade.direction == "LONG" else (trade.entry_price - price)
             floating = round(pts * trade.stake, 2)
         except Exception:
             floating = 0.0
+        lf = getattr(trade, "ladder_floor_gbp", 0.0) or 0.0
+        locked = round(lf, 2) if lf > 0 else None
         pos = {"direction": trade.direction, "entry": round(trade.entry_price, 1),
                "stop": round(trade.stop_loss, 1), "target": round(trade.take_profit, 1),
                "stake": round(trade.stake, 2), "floating_gbp": floating,
-               "ladder_step": getattr(trade, "ladder_step", 0)}
+               "ladder_step": getattr(trade, "ladder_step", 0), "locked_gbp": locked}
     lanc = "IN TRADE" if stanley.in_trade else _last.get("lancelot", "--")
     payload = {
         "system": "USBenchmark", "version": VERSION, "port": PORT,
         "mode": mode, "session": _last.get("session", "--"),
         "updated_utc": datetime.now(timezone.utc).strftime("%H:%M:%S"),
         "price": round(price, 1) if price is not None else None,
-        "in_trade": stanley.in_trade, "position": pos, "floating_gbp": floating,
+        "in_trade": stanley.in_trade, "position": pos, "floating_gbp": floating, "locked_gbp": locked,
         "signal": _last.get("signal") or "--", "lancelot": lanc,
         "portfolio": {"balance": round(stanley.capital_gbp, 2),
                       "today_pnl": round(account.daily_pnl_gbp, 2),

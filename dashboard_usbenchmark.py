@@ -3,6 +3,7 @@ dashboard_usbenchmark.py -- USBenchmark A.I. dashboard (Benchmark Desk)
 Port 5024. Single-instrument (S&P 500 (US500)). Prominent WITH/AGAINST switch (live
 reload), price, position, P&L, Lancelot, SSL signal, session. All times UTC.
 """
+import csv
 import time
 import logging
 from datetime import datetime, timezone
@@ -48,13 +49,24 @@ header{background:var(--bg2);border-bottom:2px solid var(--us);padding:10px 18px
 .pos-long{color:var(--green);font-weight:700;} .pos-short{color:var(--red);font-weight:700;}
 .lanc-clear{color:var(--green);} .lanc-block{color:var(--amber);} .lanc-trade{color:var(--us);}
 .note{color:var(--mut);font-size:10px;margin-top:14px;text-align:center;line-height:1.5;}
+.nav{display:flex;align-items:center;gap:10px;}
+.navbtn{font-size:12px;font-weight:700;color:var(--us);background:rgba(255,255,255,0.06);border:1px solid var(--us);padding:5px 12px;border-radius:6px;cursor:pointer;text-decoration:none;}
+.navbtn:hover{background:rgba(255,255,255,0.12);}
+table.tr{width:100%;border-collapse:collapse;font-size:12px;min-width:520px;}
+table.tr th{text-align:left;color:var(--mut);border-bottom:1px solid var(--bd);padding:7px 8px;font-weight:600;}
+table.tr td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.04);}
+.win{color:var(--green);font-weight:700;} .loss{color:var(--red);font-weight:700;}
 </style></head><body>
 <header>
   <div class="brand">US<span style="color:#fff">BENCHMARK</span> A.I.
     <small>__VER__ &middot; port 5024 &middot; S&P 500 (US500) &middot; Lancelot + 3-TF SSL + switch</small></div>
-  <div class="clock" id="clock">--:--:-- UTC</div>
+  <div class="nav">
+    <button class="navbtn" id="toPnl" onclick="showPage(2)">P&amp;L &rarr;</button>
+    <div class="clock" id="clock">--:--:-- UTC</div>
+  </div>
 </header>
 <div class="wrap">
+  <div id="page1">
   <div class="switch-bar">
     <span class="lbl">Direction Switch</span>
     <button class="sw-btn" id="swWITH" onclick="setDir('WITH')">WITH</button>
@@ -64,6 +76,14 @@ header{background:var(--bg2);border-bottom:2px solid var(--us);padding:10px 18px
   <div class="card"><div id="body">Awaiting engine...</div></div>
   <div class="note">Benchmark Desk &mdash; pure Lancelot + 3-timeframe SSL agreement, traded WITH or AGAINST.
     No Arthur, Morgan, Guinevere or phantom logging. Paper trading only.</div>
+  </div><!-- /page1 -->
+  <div id="page2" style="display:none;">
+    <div style="margin-bottom:14px;"><button class="navbtn" onclick="showPage(1)">&larr; Back to Dashboard</button></div>
+    <div class="card">
+      <div style="font-size:16px;font-weight:800;color:var(--us);margin-bottom:12px;">Trade History &mdash; P&amp;L</div>
+      <div id="pnlBody" style="overflow-x:auto;">Loading...</div>
+    </div>
+  </div><!-- /page2 -->
 </div>
 <script>
 function clk(){var t=new Date();document.getElementById('clock').textContent=
@@ -110,8 +130,57 @@ function poll(){
   fetch('/api/direction').then(function(r){return r.json();}).then(renderDir).catch(function(e){});
 }
 poll();setInterval(poll,5000);
+function showPage(n){
+  document.getElementById('page1').style.display=(n===1?'':'none');
+  document.getElementById('page2').style.display=(n===2?'':'none');
+  if(n===2){loadTrades();}
+}
+function loadTrades(){
+  fetch('/api/trades').then(function(r){return r.json();}).then(function(d){
+    var t=d.trades||[];
+    if(!t.length){document.getElementById('pnlBody').innerHTML='<div class="mut">No trades recorded yet.</div>';return;}
+    var h='<table class="tr"><thead><tr><th>Date</th><th>Time</th><th>Dir</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Result</th></tr></thead><tbody>';
+    for(var i=0;i<t.length;i++){var r=t[i];
+      var rc=r.result==='WIN'?'win':(r.result==='LOSS'?'loss':'mut');
+      h+='<tr><td>'+r.date+'</td><td>'+r.time+'</td><td>'+r.direction+'</td><td>'+r.entry+'</td><td>'+r.exit+'</td>'+
+         '<td class="'+rc+'">'+money(r.pnl_gbp)+'</td><td class="'+rc+'">'+r.result+'</td></tr>';
+    }
+    h+='</tbody></table>';
+    document.getElementById('pnlBody').innerHTML=h;
+  }).catch(function(e){document.getElementById('pnlBody').innerHTML='<div class="loss">Error loading trades.</div>';});
+}
 </script>
 </body></html>"""
+
+
+TRADES_CSV = BASE_DIR / "logs" / "us_trades.csv"
+
+
+def _read_trades(path, limit=300):
+    """Read a Stanley trade-history CSV into normalized rows (most recent first)."""
+    rows = []
+    if not path.exists():
+        return rows
+    try:
+        with path.open(newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                pnl = r.get("pnl_gbp")
+                try:
+                    pnlf = round(float(pnl), 2)
+                except (TypeError, ValueError):
+                    pnlf = None
+                rows.append({
+                    "date": r.get("date", ""), "time": r.get("time", ""),
+                    "direction": r.get("direction", ""),
+                    "entry": r.get("entry_price_usd") or r.get("entry_price") or "",
+                    "exit": r.get("exit_price_usd") or r.get("exit_price") or "",
+                    "pnl_gbp": pnlf,
+                    "result": ("WIN" if pnlf >= 0 else "LOSS") if pnlf is not None else "--",
+                    "reason": r.get("exit_reason", ""),
+                })
+    except Exception:
+        pass
+    return rows[-limit:][::-1]
 
 
 @app.route("/")
@@ -144,6 +213,11 @@ def api_direction():
         return jsonify(direction_switch.set_mode(body.get("mode"), set_by=by))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/trades")
+def api_trades():
+    return jsonify({"trades": _read_trades(TRADES_CSV)})
 
 
 @app.route("/api/health")
