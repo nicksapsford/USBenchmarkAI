@@ -274,7 +274,7 @@ def main() -> None:
     except Exception as exc:
         log.error("Capital.com connect failed: %s -- yfinance fallback", exc)
 
-    feed = USDataFeed(ig_connector=ig if ig_connected else None)
+    feed = USDataFeed(connector=ig if ig_connected else None)   # USDataFeed uses 'connector=' (not ig_connector)
     try:
         feed.initialise()
     except Exception as exc:
