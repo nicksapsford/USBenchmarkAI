@@ -86,6 +86,7 @@ class AccountState:
     def __init__(self, capital: float) -> None:
         self.capital_gbp = capital
         self.daily_pnl_gbp = 0.0
+        self.current_day = datetime.now(timezone.utc).date()  # Benchmark daily-reset fix
         self.consecutive_losses = 0
         self.last_loss_time = None
         self.kill_switch_active = False
@@ -102,6 +103,24 @@ class AccountState:
             self.last_loss_time = datetime.now(timezone.utc)
         else:
             self.consecutive_losses = 0
+
+    def maybe_reset_daily(self, now_utc) -> bool:
+        """Benchmark daily-reset fix (22 Jul 2026). On a new UTC trading day, clear the
+        daily loss tally and the daily-loss kill switch so yesterday's loss does not carry
+        into today. Previously daily_pnl_gbp was zeroed ONLY at process start, so a prior
+        day's loss permanently re-triggered the kill switch until a manual restart."""
+        today = now_utc.date()
+        if today == self.current_day:
+            return False
+        self.current_day = today
+        self.daily_pnl_gbp = 0.0
+        self.consecutive_losses = 0
+        self.kill_switch_active = False
+        self.kill_switch_tier = 0
+        self.kill_switch_until = None
+        self.kill_switch_reason = ""
+        log.info("New UTC trading day %s -- daily P&L + kill switch reset.", today)
+        return True
 
 
 def _ssl(bar):
@@ -304,6 +323,7 @@ def main() -> None:
                 break
             now = time.monotonic()
             now_utc = datetime.now(timezone.utc)
+            account.maybe_reset_daily(now_utc)  # Benchmark daily-reset fix
 
             if check_kill_switch_reset(account):
                 account.kill_switch_tier = 0
